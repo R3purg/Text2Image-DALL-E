@@ -1,7 +1,5 @@
 from typing import Tuple
-
 from transformers import PretrainedConfig
-
 
 class VQGANConfig(PretrainedConfig):
 		def __init__(

@@ -14,6 +14,9 @@ from transformers.modeling_flax_utils import FlaxPreTrainedModel
 
 from configuration_vqgan import VQGANConfig
 
+from pytorch_lightning.loggers import WandbLogger
+import wandb
+
 class Upsample(nn.Module):
 	in_channels: int
 	with_conv: bool
@@ -653,6 +656,8 @@ class VQGANPreTrainedModel(FlaxPreTrainedModel):
 		# Handle any PRNG if needed
 		rngs = {"dropout": dropout_rng} if dropout_rng is not None else {}
 
+		wandb.run.summary["pixel_values"] = pixel_values
+
 		return self.module.apply(
 				{"params": params or self.params},
 				jnp.array(pixel_values),
@@ -663,4 +668,5 @@ class VQGANPreTrainedModel(FlaxPreTrainedModel):
 
 class VQModel(VQGANPreTrainedModel):
 	print('LOCAL RUN WORKS!')
+	wandb_logger = WandbLogger(project="text2image", entity="r3purg")
 	module_class = VQModule

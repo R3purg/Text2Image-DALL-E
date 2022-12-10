@@ -5,11 +5,12 @@ from flax.traverse_util import flatten_dict, unflatten_dict
 
 import torch
 
-from .modeling_flax_vqgan import VQModel
-from .configuration_vqgan import VQGANConfig
+from modeling_flax_vqgan import VQModel
+from configuration_vqgan import VQGANConfig
+
+import wandb
 
 regex = r"\w+[.]\d+"
-
 
 def rename_key(key):
 	pats = re.findall(regex, key)
@@ -20,7 +21,7 @@ def rename_key(key):
 
 # Adapted from https://github.com/huggingface/transformers/blob/ff5cdc086be1e0c3e2bbad8e3469b34cffb55a85/src/transformers/modeling_flax_pytorch_utils.py#L61
 def convert_pytorch_state_dict_to_flax(pt_state_dict, flax_model):
-	# convert pytorch tensor to numpy
+	# Convert pytorch tensor to numpy
 	pt_state_dict = {k: v.numpy() for k, v in pt_state_dict.items()}
 
 	random_flax_state_dict = flatten_dict(flax_model.params)
@@ -62,12 +63,12 @@ def convert_pytorch_state_dict_to_flax(pt_state_dict, flax_model):
 			pt_tuple_key = pt_tuple_key[:-1] + ("embedding", )
 		elif pt_tuple_key[
 				-1] == "weight" and pt_tensor.ndim == 4 and pt_tuple_key not in random_flax_state_dict:
-			# conv layer
+			# Conv layer
 			pt_tuple_key = pt_tuple_key[:-1] + ("kernel", )
 			pt_tensor = pt_tensor.transpose(2, 3, 1, 0)
 		elif pt_tuple_key[
 				-1] == "weight" and pt_tuple_key not in random_flax_state_dict:
-			# linear layer
+			# Linear layer
 			pt_tuple_key = pt_tuple_key[:-1] + ("kernel", )
 			pt_tensor = pt_tensor.T
 		elif pt_tuple_key[-1] == "gamma":
@@ -82,11 +83,10 @@ def convert_pytorch_state_dict_to_flax(pt_state_dict, flax_model):
 						f"{random_flax_state_dict[pt_tuple_key].shape}, but is {pt_tensor.shape}."
 				)
 
-		# also add unexpected weight so that warning is thrown
+		# Also add unexpected weight so that warning is thrown
 		flax_state_dict[pt_tuple_key] = jnp.asarray(pt_tensor)
 
 	return unflatten_dict(flax_state_dict)
-
 
 def convert_model(config_path, pt_state_dict_path, save_path):
 	config = VQGANConfig.from_pretrained(config_path)
@@ -99,6 +99,9 @@ def convert_model(config_path, pt_state_dict_path, save_path):
 			state_dict.pop(key)
 			continue
 		renamed_key = rename_key(key)
+
+		wandb.run.summary["state_dict"] = state_dict
+
 		state_dict[renamed_key] = state_dict.pop(key)
 
 	state = convert_pytorch_state_dict_to_flax(state_dict, model)
