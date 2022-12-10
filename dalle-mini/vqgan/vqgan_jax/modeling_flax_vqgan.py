@@ -14,6 +14,7 @@ from transformers.modeling_flax_utils import FlaxPreTrainedModel
 
 from configuration_vqgan import VQGANConfig
 
+import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 import wandb
 
