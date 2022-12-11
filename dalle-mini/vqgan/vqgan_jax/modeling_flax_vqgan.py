@@ -1,18 +1,17 @@
-# JAX implementation of VQGAN from taming-transformers https://github.com/CompVis/taming-transformers
-
-from functools import partial
-from typing import Tuple
 import math
+from typing import Tuple
+from functools import partial
 
 import jax
-import jax.numpy as jnp
 import numpy as np
+import jax.numpy as jnp
 import flax.linen as nn
 from flax.core.frozen_dict import FrozenDict
 
 from transformers.modeling_flax_utils import FlaxPreTrainedModel
 
 import torch
+import tensorflow
 from CLIP import clip
 import matplotlib.pyplot as plt
 import kornia.augmentation as K
@@ -21,9 +20,9 @@ from torchvision.utils import make_grid
 from configuration_vqgan import VQGANConfig
 from torchvision.transforms import functional as TF
 
+import wandb
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
-import wandb
 
 class Upsample(nn.Module):
 	in_channels: int
@@ -77,31 +76,20 @@ class Downsample(nn.Module):
 																	window_shape=(2, 2),
 																	strides=(2, 2),
 																	padding="VALID")
-		
-		# plt.imshow(tensor_to_image(make_grid(jax.image, nrow=8)))
 
-		# print('Batch (hidden_states) before cutouts: ', hidden_states)
-		# plt.imshow(tensor_to_image(make_grid(batch, nrow=8)))
-
-		# device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-		# perceptor = clip.load(
-		# 	# args.clip_model,
-		# 	'ViT-B/32',
-		# 	jit=False
-		# )[0].eval().requires_grad_(False).to(device)
-		# cut_size = perceptor.visual.input_resolution
-		# make_cutouts = MakeCutouts(
-		# 	cut_size,
-		# 	# args.cutn,
-		# 	32,
-		# 	# cut_pow=args.cut_pow
-		# 	1.
-		# )
-		# print('make_cutouts: ', make_cutouts)
-		# batch = make_cutouts(TF.to_tensor(jax.image).unsqueeze(0).to(device))
-
-		# print('Batch after cutouts: ', batch)
-		# plt.imshow(tensor_to_image(make_grid(batch, nrow=8)))
+		# Using MakeCutouts submodule:
+			# device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+			# perceptor = clip.load(
+			# 	'ViT-B/32',
+			# 	jit=False
+			# )[0].eval().requires_grad_(False).to(device)
+			# cut_size = perceptor.visual.input_resolution
+			# make_cutouts = MakeCutouts(
+			# 	cut_size,
+			# 	32,
+			# 	1.
+			# )
+			# hidden_states = make_cutouts(tensorflow.to_tensor(hidden_states).unsqueeze(0).to(device))
 
 		return hidden_states
 
@@ -111,17 +99,7 @@ class MakeCutouts(nn.Module):
 	cut_pow: float
 
 	def setup(self):
-		# self.cut_size
-		# self.cutn
-		# self.cut_pow
-
 		self.augs = nn.Sequential(
-			# K.RandomHorizontalFlip(p=0.5),
-			# K.RandomVerticalFlip(p=0.5),
-			# K.RandomSolarize(0.01, 0.01, p=0.7),
-			# K.RandomSharpness(0.3,p=0.4),
-			# K.RandomResizedCrop(size=(self.cut_size,self.cut_size), scale=(0.1,1),  ratio=(0.75,1.333), cropping_mode='resample', p=0.5),
-			# K.RandomCrop(size=(self.cut_size,self.cut_size), p=0.5),
 			K.RandomAffine(degrees=15, translate=0.1, p=0.7, padding_mode='border'),
 			K.RandomPerspective(0.7,p=0.7),
 			K.ColorJitter(hue=0.1, saturation=0.1, p=0.7),
@@ -132,28 +110,15 @@ class MakeCutouts(nn.Module):
 		self.max_pool = nn.AdaptiveMaxPool2d((self.cut_size, self.cut_size))
 
 	def __call__(self, input):
-		# sideY, sideX = input.shape[2:4]
-		# max_size = min(sideX, sideY)
-		# min_size = min(sideX, sideY, self.cut_size)
 		cutouts = []
 
 		for _ in range(self.cutn):
-			# size = int(torch.rand([])**self.cut_pow * (max_size - min_size) + min_size)
-			# offsetx = torch.randint(0, sideX - size + 1, ())
-			# offsety = torch.randint(0, sideY - size + 1, ())
-			# cutout = input[:, :, offsety:offsety + size, offsetx:offsetx + size]
-			# cutouts.append(resample(cutout, (self.cut_size, self.cut_size)))
-			
-			# cutout = transforms.Resize(size=(self.cut_size, self.cut_size))(input)
-			
 			cutout = (self.av_pool(input) + self.max_pool(input))/2
 			cutouts.append(cutout)
 		batch = self.augs(torch.cat(cutouts, dim=0))
 		if self.noise_fac:
 				facs = batch.new_empty([self.cutn, 1, 1, 1]).uniform_(0, self.noise_fac)
 				batch = batch + facs * torch.randn_like(batch)
-
-		print('Batch in MakeCutouts: ', batch)
 
 		return batch
 
@@ -216,7 +181,7 @@ class ResnetBlock(nn.Module):
 
 		if temb is not None:
 			hidden_states = hidden_states + self.temb_proj(
-					nn.swish(temb))[:, :, None, None]  # TODO: check shapes
+					nn.swish(temb))[:, :, None, None] # TODO: check shapes
 
 		hidden_states = self.norm2(hidden_states)
 		hidden_states = nn.swish(hidden_states)
@@ -264,7 +229,7 @@ class AttnBlock(nn.Module):
 		attn_weights = attn_weights * (int(channels)**-0.5)
 		attn_weights = nn.softmax(attn_weights, axis=2)
 
-		## attend to values
+		# attend to values
 		value = value.reshape((batch, height * width, channels))
 		hidden_states = jnp.einsum("...kc,...qk->...qc", value, attn_weights)
 		hidden_states = hidden_states.reshape((batch, height, width, channels))
@@ -324,7 +289,6 @@ class UpsamplingBlock(nn.Module):
 
 		return hidden_states
 
-
 class DownsamplingBlock(nn.Module):
 	config: VQGANConfig
 	curr_res: int
@@ -372,7 +336,6 @@ class DownsamplingBlock(nn.Module):
 
 		return hidden_states
 
-
 class MidBlock(nn.Module):
 	in_channels: int
 	temb_channels: int
@@ -405,7 +368,6 @@ class MidBlock(nn.Module):
 																 temb,
 																 deterministic=deterministic)
 		return hidden_states
-
 
 class Encoder(nn.Module):
 	config: VQGANConfig
@@ -560,7 +522,7 @@ class VectorQuantizer(nn.Module):
 		- e_dim : dimension of embedding
 		- beta : commitment cost used in loss term, beta * ||z_e(x)-sg[e]||^2
 		_____________________________________________
-		"""
+	"""
 
 	config: VQGANConfig
 	dtype: jnp.dtype = jnp.float32
@@ -572,15 +534,18 @@ class VectorQuantizer(nn.Module):
 
 	def __call__(self, hidden_states):
 		"""
-				Inputs the output of the encoder network z and maps it to a discrete
-				one-hot vector that is the index of the closest embedding vector e_j
-				z (continuous) -> z_q (discrete)
-				z.shape = (batch, channel, height, width)
-				quantization pipeline:
-						1. get encoder input (B,C,H,W)
-						2. flatten input to (B*H*W,C)
-				"""
-		#  flatten
+			Inputs the output of the encoder network z and maps it to a discrete
+			one-hot vector that is the index of the closest embedding vector e_j
+			z (continuous) -> z_q (discrete)
+			z.shape = (batch, channel, height, width)
+			quantization pipeline:
+					1. get encoder input (B,C,H,W)
+					2. flatten input to (B*H*W,C)
+		"""
+
+		WandbLogger(project="text2image", entity="r3purg")
+
+		# flatten
 		hidden_states_flattended = hidden_states.reshape(
 				(-1, self.config.embed_dim))
 
@@ -601,12 +566,16 @@ class VectorQuantizer(nn.Module):
 		min_encoding_indices = min_encoding_indices.reshape(
 				hidden_states.shape[0], -1)
 
-		print('z_q: ', z_q)
-		print('hidden_states: ', hidden_states)
+		# Calculating codebook_loss
+			# codebook_loss = jnp.mean((
+			# 	jnp.sum(emb_weights, axis=1) -
+			# 	jnp.sum(hidden_states_flattended, axis=1))**2) + 0.25 * torch.mean((
+			# 	jnp.sum(emb_weights, axis=1) -
+			# 	jnp.sum(hidden_states_flattended, axis=1))**2)
 
-		codebook_loss = TF.reduce_mean((z_q - TF.stop_gradient(hidden_states)) ** 2)
+			# wandb.run.summary["codebook_loss"] = codebook_loss
 
-		print('codebook_loss: ', codebook_loss)
+			# print('codebook_loss: ', codebook_loss)
 
 		# compute the codebook_loss (q_loss) outside the model
 		# here we return the embeddings and indices
@@ -620,7 +589,6 @@ class VectorQuantizer(nn.Module):
 		z_q = z_q.reshape(batch, int(math.sqrt(num_tokens)),
 											int(math.sqrt(num_tokens)), -1)
 		return z_q
-
 
 class VQModule(nn.Module):
 	config: VQGANConfig
@@ -671,7 +639,7 @@ class VQGANPreTrainedModel(FlaxPreTrainedModel):
 	"""
 		An abstract class to handle weights initialization and a simple interface
 		for downloading and loading pretrained models.
-		"""
+	"""
 
 	config_class = VQGANConfig
 	base_model_prefix = "model"
@@ -748,8 +716,6 @@ class VQGANPreTrainedModel(FlaxPreTrainedModel):
 		# Handle any PRNG if needed
 		rngs = {"dropout": dropout_rng} if dropout_rng is not None else {}
 
-		wandb.run.summary["pixel_values"] = pixel_values
-
 		return self.module.apply(
 				{"params": params or self.params},
 				jnp.array(pixel_values),
@@ -760,5 +726,4 @@ class VQGANPreTrainedModel(FlaxPreTrainedModel):
 
 class VQModel(VQGANPreTrainedModel):
 	print('LOCAL RUN WORKS!')
-	wandb_logger = WandbLogger(project="text2image", entity="r3purg")
 	module_class = VQModule

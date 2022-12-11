@@ -8,8 +8,6 @@ import torch
 from modeling_flax_vqgan import VQModel
 from configuration_vqgan import VQGANConfig
 
-import wandb
-
 regex = r"\w+[.]\d+"
 
 def rename_key(key):
@@ -99,8 +97,6 @@ def convert_model(config_path, pt_state_dict_path, save_path):
 			state_dict.pop(key)
 			continue
 		renamed_key = rename_key(key)
-
-		wandb.run.summary["state_dict"] = state_dict
 
 		state_dict[renamed_key] = state_dict.pop(key)
 
