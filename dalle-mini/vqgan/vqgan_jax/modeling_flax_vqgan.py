@@ -42,31 +42,6 @@ class Upsample(nn.Module):
 
 	def __call__(self, hidden_states):
 		batch, height, width, channels = hidden_states.shape
-
-		plt.imshow(tensor_to_image(make_grid(jax.image, nrow=8)))
-
-		print('Batch before cutouts: ', batch)
-		plt.imshow(tensor_to_image(make_grid(batch, nrow=8)))
-
-		device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-		perceptor = clip.load(
-			# args.clip_model,
-			'ViT-B/32',
-			jit=False
-		)[0].eval().requires_grad_(False).to(device)
-		cut_size = perceptor.visual.input_resolution
-		make_cutouts = nn.MakeCutouts(
-			cut_size,
-			# args.cutn,
-			32,
-			# cut_pow=args.cut_pow
-			1.
-		)
-		batch = make_cutouts(TF.to_tensor(jax.image).unsqueeze(0).to(device))
-
-		print('Batch after cutouts: ', batch)
-		plt.imshow(tensor_to_image(make_grid(batch, nrow=8)))
-
 		hidden_states = jax.image.resize(
 				hidden_states,
 				shape=(batch, height * 2, width * 2, channels),
@@ -102,17 +77,43 @@ class Downsample(nn.Module):
 																	window_shape=(2, 2),
 																	strides=(2, 2),
 																	padding="VALID")
+		
+		# plt.imshow(tensor_to_image(make_grid(jax.image, nrow=8)))
+
+		# print('Batch (hidden_states) before cutouts: ', hidden_states)
+		# plt.imshow(tensor_to_image(make_grid(batch, nrow=8)))
+
+		# device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+		# perceptor = clip.load(
+		# 	# args.clip_model,
+		# 	'ViT-B/32',
+		# 	jit=False
+		# )[0].eval().requires_grad_(False).to(device)
+		# cut_size = perceptor.visual.input_resolution
+		# make_cutouts = MakeCutouts(
+		# 	cut_size,
+		# 	# args.cutn,
+		# 	32,
+		# 	# cut_pow=args.cut_pow
+		# 	1.
+		# )
+		# print('make_cutouts: ', make_cutouts)
+		# batch = make_cutouts(TF.to_tensor(jax.image).unsqueeze(0).to(device))
+
+		# print('Batch after cutouts: ', batch)
+		# plt.imshow(tensor_to_image(make_grid(batch, nrow=8)))
+
 		return hidden_states
 
 class MakeCutouts(nn.Module):
 	cut_size: int
 	cutn: int
-	cut_pow: jnp.dtype = jnp.float32
+	cut_pow: float
 
 	def setup(self):
-		self.cut_size
-		self.cutn
-		self.cut_pow
+		# self.cut_size
+		# self.cutn
+		# self.cut_pow
 
 		self.augs = nn.Sequential(
 			# K.RandomHorizontalFlip(p=0.5),
@@ -151,52 +152,10 @@ class MakeCutouts(nn.Module):
 		if self.noise_fac:
 				facs = batch.new_empty([self.cutn, 1, 1, 1]).uniform_(0, self.noise_fac)
 				batch = batch + facs * torch.randn_like(batch)
+
+		print('Batch in MakeCutouts: ', batch)
+
 		return batch
-
-	# def __init__(self, cut_size, cutn, cut_pow=1.):
-	# 		super().__init__()
-	# 		self.cut_size = cut_size
-	# 		self.cutn = cutn
-	# 		self.cut_pow = cut_pow
-
-	# 		self.augs = nn.Sequential(
-	# 			# K.RandomHorizontalFlip(p=0.5),
-	# 			# K.RandomVerticalFlip(p=0.5),
-	# 			# K.RandomSolarize(0.01, 0.01, p=0.7),
-	# 			# K.RandomSharpness(0.3,p=0.4),
-	# 			# K.RandomResizedCrop(size=(self.cut_size,self.cut_size), scale=(0.1,1),  ratio=(0.75,1.333), cropping_mode='resample', p=0.5),
-	# 			# K.RandomCrop(size=(self.cut_size,self.cut_size), p=0.5),
-	# 			K.RandomAffine(degrees=15, translate=0.1, p=0.7, padding_mode='border'),
-	# 			K.RandomPerspective(0.7,p=0.7),
-	# 			K.ColorJitter(hue=0.1, saturation=0.1, p=0.7),
-	# 			K.RandomErasing((.1, .4), (.3, 1/.3), same_on_batch=True, p=0.7),
-	# 		)
-	# 		self.noise_fac = 0.1
-	# 		self.av_pool = nn.AdaptiveAvgPool2d((self.cut_size, self.cut_size))
-	# 		self.max_pool = nn.AdaptiveMaxPool2d((self.cut_size, self.cut_size))
-	
-	# def forward(self, input):
-	# 	# sideY, sideX = input.shape[2:4]
-	# 	# max_size = min(sideX, sideY)
-	# 	# min_size = min(sideX, sideY, self.cut_size)
-	# 	cutouts = []
-
-	# 	for _ in range(self.cutn):
-	# 		# size = int(torch.rand([])**self.cut_pow * (max_size - min_size) + min_size)
-	# 		# offsetx = torch.randint(0, sideX - size + 1, ())
-	# 		# offsety = torch.randint(0, sideY - size + 1, ())
-	# 		# cutout = input[:, :, offsety:offsety + size, offsetx:offsetx + size]
-	# 		# cutouts.append(resample(cutout, (self.cut_size, self.cut_size)))
-			
-	# 		# cutout = transforms.Resize(size=(self.cut_size, self.cut_size))(input)
-			
-	# 		cutout = (self.av_pool(input) + self.max_pool(input))/2
-	# 		cutouts.append(cutout)
-	# 	batch = self.augs(torch.cat(cutouts, dim=0))
-	# 	if self.noise_fac:
-	# 			facs = batch.new_empty([self.cutn, 1, 1, 1]).uniform_(0, self.noise_fac)
-	# 			batch = batch + facs * torch.randn_like(batch)
-	# 	return batch
 
 class ResnetBlock(nn.Module):
 	in_channels: int
@@ -641,6 +600,13 @@ class VectorQuantizer(nn.Module):
 		# reshape to (batch, num_tokens)
 		min_encoding_indices = min_encoding_indices.reshape(
 				hidden_states.shape[0], -1)
+
+		print('z_q: ', z_q)
+		print('hidden_states: ', hidden_states)
+
+		codebook_loss = TF.reduce_mean((z_q - TF.stop_gradient(hidden_states)) ** 2)
+
+		print('codebook_loss: ', codebook_loss)
 
 		# compute the codebook_loss (q_loss) outside the model
 		# here we return the embeddings and indices
