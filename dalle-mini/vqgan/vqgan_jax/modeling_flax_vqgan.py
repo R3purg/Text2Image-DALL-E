@@ -14,8 +14,12 @@ from transformers.modeling_flax_utils import FlaxPreTrainedModel
 
 import torch
 from CLIP import clip
+import matplotlib.pyplot as plt
 import kornia.augmentation as K
+from kornia import tensor_to_image
+from torchvision.utils import make_grid
 from configuration_vqgan import VQGANConfig
+from torchvision.transforms import functional as TF
 
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
@@ -38,6 +42,31 @@ class Upsample(nn.Module):
 
 	def __call__(self, hidden_states):
 		batch, height, width, channels = hidden_states.shape
+
+		plt.imshow(tensor_to_image(make_grid(jax.image, nrow=8)))
+
+		print('Batch before cutouts: ', batch)
+		plt.imshow(tensor_to_image(make_grid(batch, nrow=8)))
+
+		device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+		perceptor = clip.load(
+			# args.clip_model,
+			'ViT-B/32',
+			jit=False
+		)[0].eval().requires_grad_(False).to(device)
+		cut_size = perceptor.visual.input_resolution
+		make_cutouts = nn.MakeCutouts(
+			cut_size,
+			# args.cutn,
+			32,
+			# cut_pow=args.cut_pow
+			1.
+		)
+		batch = make_cutouts(TF.to_tensor(jax.image).unsqueeze(0).to(device))
+
+		print('Batch after cutouts: ', batch)
+		plt.imshow(tensor_to_image(make_grid(batch, nrow=8)))
+
 		hidden_states = jax.image.resize(
 				hidden_states,
 				shape=(batch, height * 2, width * 2, channels),
@@ -52,21 +81,6 @@ class Downsample(nn.Module):
 	in_channels: int
 	with_conv: bool
 	dtype: jnp.dtype = jnp.float32
-
-	device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-	perceptor = clip.load(
-		# args.clip_model,
-		'ViT-B/32',
-		jit=False
-	)[0].eval().requires_grad_(False).to(device)
-	cut_size = perceptor.visual.input_resolution
-	make_cutouts = nn.MakeCutouts(
-		cut_size,
-		# args.cutn,
-		32,
-		# cut_pow=args.cut_pow
-		1.
-	)
 
 	def setup(self):
 		if self.with_conv:
