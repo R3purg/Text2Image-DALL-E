@@ -4,7 +4,7 @@
 # scikit-learn==1.0.2
 pytorch-lightning
 dalle-mini
+kornia
 # torchmetrics
 # click
 # wandb
-# kornia
